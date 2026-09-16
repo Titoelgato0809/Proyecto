@@ -330,14 +330,51 @@ Warehouse (no contra el archivo fuente ni DataFrames intermedios):
 
 ## 15. Business Intelligence
 
-> **Pendiente de completar por el equipo.** Este repositorio deja lista la capa de datos (Data
-> Warehouse + consultas SQL) para conectar un dashboard. Falta construir y conectar el dashboard
-> (Power BI, Tableau o Looker Studio) directamente al Data Warehouse MySQL —no al archivo fuente—
-> y exportar su evidencia (capturas de pantalla o archivo `.pbix`/enlace) a `docs/dashboard.png`
-> y, si aplica, a una carpeta `docs/bi/`. El dashboard debe incluir, como mínimo: análisis
-> geográfico/territorial (R1–R2), análisis comparativo por tipo de servicio (R3), KPIs
-> demográficos (R4) y un cruce de vulnerabilidad territorial (R5), con filtros útiles
-> (departamento, tipo de servicio, rango de edad, etc.).
+## 15. Business Intelligence
+
+El dashboard analítico fue construido en **Power BI Desktop**, conectado directamente 
+al Data Warehouse en MySQL (`icbf_primera_infancia_dw`) mediante el conector nativo 
+de MySQL — no se lee el archivo fuente en ningún momento.
+
+**Archivo:** `docs/Dashboard.pbix`
+**Evidencia visual:** `docs/dashboard.png`
+
+### Estructura del dashboard (5 páginas)
+
+| Página | Requerimiento(s) | Contenido |
+|---|---|---|
+| **Resumen Ejecutivo** | Contexto general | Tarjetas KPI: Total de Beneficiarios, Departamentos Atendidos, Municipios Atendidos, Unidades de Servicio |
+| **Análisis Territorial** | R1, R2 | Distribución de beneficiarios por departamento; matriz con drill-down departamento → municipio |
+| **Tipos de Servicio** | R3 | Ranking nacional de tipos de servicio; composición por departamento (Top 10, barras apiladas 100%) |
+| **Caracterización Poblacional** | R4 | Distribución por sexo, rango de edad, grupo étnico y discapacidad |
+| **Vulnerabilidad Territorial** | R5 | % de población indígena y % en zona rural, por departamento |
+
+### KPIs y medidas (DAX)
+
+- `Total Beneficiarios` — medida base, suma de la tabla de hechos.
+- `% Indigena` y `% Zona Rural` — proporción de población vulnerable dentro de cada departamento (medidas con `ALLEXCEPT`, para calcular el porcentaje relativo al total departamental, no al total nacional).
+
+### Filtros
+
+Filtros transversales (aplican a las 5 páginas simultáneamente): departamento, tipo de servicio, sexo, rango de edad, grupo étnico, discapacidad y zona de ubicación.
+
+### Análisis temporal — no aplicable
+
+El dataset original solo contiene el valor `2025` en el campo `Vigencia` (confirmado 
+en el perfilamiento, Sección 7), sin variabilidad temporal alguna. Por esta razón, 
+`Vigencia` fue excluida del modelo dimensional (ver grano declarado, Sección 10) y 
+el dashboard no incluye un componente de análisis temporal, en cumplimiento del 
+criterio *"when applicable"* de los requisitos del proyecto.
+
+### Nota de interpretación: proporción vs. volumen absoluto
+
+En la página de Vulnerabilidad Territorial, los departamentos líderes en % de 
+población indígena/rural (ej. Vaupés, San Andrés) no son necesariamente los mismos 
+que lideran en volumen absoluto de beneficiarios (La Guajira). Esto se debe a que 
+departamentos con menor población total atendida pueden tener una proporción interna 
+más alta de un grupo específico, sin que eso implique mayor relevancia en términos 
+de volumen poblacional. Ambas lecturas (proporcional y absoluta) se consideran 
+complementarias, no contradictorias, para la toma de decisiones.
 
 ## 16. Interpretación analítica — hallazgos
 
