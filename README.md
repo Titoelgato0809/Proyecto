@@ -419,8 +419,6 @@ vulnerabilidad interseccional, más allá del volumen total de beneficiarios.
   atributos del grano declarado; se asume que estos representan conteos legítimos que deben
   sumarse (`SUM`), no errores de captura, siguiendo el mismo criterio con que el dataset fuente ya
   entrega `Beneficiarios` como una cifra agregada.
-- **BI pendiente:** al momento de esta entrega, el dashboard de Business Intelligence conectado al
-  Data Warehouse aún no ha sido construido/documentado (ver sección 15).
 
 ## 18. Cómo reproducir el proyecto
 
