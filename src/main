@@ -1,0 +1,197 @@
+"""
+main.py
+=======
+
+Orquestador principal del proceso ETL del Data Warehouse
+"ICBF - Primera Infancia".
+
+Flujo:
+    1. EXTRACT   -> src/extract.py        Lee el Excel fuente.
+    2. TRANSFORM -> src/transform.py      Limpia, tipa y prepara el dataset.
+    3. VALIDATE  -> src/validation.py     Corre reglas de calidad de datos.
+    4. MODEL     -> src/dimensional_model.py  Construye dimensiones + hecho.
+    5. LOAD      -> src/load.py           Crea el esquema en MySQL y carga
+                                          dimensiones y hechos.
+
+Antes de ejecutar:
+    - Completar la contraseña de MySQL en el archivo .env (DB_PASSWORD).
+    - Verificar que DB_NAME en .env coincida con la base creada en
+      sql/create_dw.sql (icbf_primera_infancia_dw).
+    - Instalar dependencias: pip install -r requirements.txt
+"""
+
+from pathlib import Path
+
+from extract import extraer_datos, RUTA_RAW
+from transform import transformar
+from validation import validation
+from dimensional_model import (
+    build_dim_geography,
+    build_dim_service_unit,
+    build_dim_service,
+    build_dim_beneficiary_profile,
+    build_dim_attention_status,
+    build_fact_atencion,
+)
+from load import crear_esquema, reset_schema, save_to_csv, save_to_mysql
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+RUTA_PROCESSED = PROJECT_ROOT / "Data" / "processed"
+
+
+# ============================================================
+# RENOMBRADO DE COLUMNAS (DataFrame -> nombres de columnas SQL)
+# ============================================================
+# Las dimensiones se construyen con los nombres originales del
+# dataset (con espacios y tildes). Antes de insertarlas en MySQL
+# se renombran para que coincidan exactamente con las columnas
+# definidas en sql/create_dw.sql.
+
+RENOMBRE_DIM_GEOGRAPHY = {
+    "Codigo Departamento UDS": "codigo_departamento_uds",
+    "Departamento UDS": "departamento_uds",
+    "Codigo Municipio UDS": "codigo_municipio_uds",
+    "Municipio UDS": "municipio_uds",
+    "Codigo CentroZonal UDS": "codigo_centrozonal_uds",
+    "Centro Zonal UDS": "centro_zonal_uds",
+}
+
+RENOMBRE_DIM_SERVICE_UNIT = {
+    "Codigo Unidad Servicio": "codigo_unidad_servicio",
+    "Unidad Servicio": "unidad_servicio",
+    "Estado UDS": "estado_uds",
+}
+
+RENOMBRE_DIM_SERVICE = {
+    "Nombre Servicio": "nombre_servicio",
+    "Tipo Servicio": "tipo_servicio",
+}
+
+RENOMBRE_DIM_BENEFICIARY_PROFILE = {
+    "Sexo": "sexo",
+    "Rango Edad": "rango_edad",
+    "Grupo Etnico": "grupo_etnico",
+    "Presenta Discapacidad": "presenta_discapacidad",
+    "Zona Ubicacion Beneficiario": "zona_ubicacion",
+    "Tipo de Beneficiario": "tipo_beneficiario",
+    "Pais Nacimiento": "pais_nacimiento",
+}
+
+RENOMBRE_DIM_ATTENTION_STATUS = {
+    "Estado Atención": "estado_atencion",
+    "description": "descripcion",
+}
+
+
+def preparar_para_mysql(df, renombre: dict):
+    """Devuelve una copia del DataFrame con columnas renombradas
+    a los nombres usados en el esquema de MySQL."""
+    return df.rename(columns=renombre)
+
+
+def ejecutar_etl():
+
+    print("=" * 60)
+    print("INICIO DEL PROCESO ETL - ICBF PRIMERA INFANCIA")
+    print("=" * 60)
+
+    # --------------------------------------------------------
+    # 1. EXTRACT
+    # --------------------------------------------------------
+    print("\n[1/5] EXTRACCIÓN")
+    df_raw = extraer_datos(RUTA_RAW)
+
+    # --------------------------------------------------------
+    # 2. TRANSFORM
+    # --------------------------------------------------------
+    print("\n[2/5] TRANSFORMACIÓN")
+    df_clean = transformar(df_raw)
+    print(f"Dataset transformado: {df_clean.shape[0]:,} filas, "
+          f"{df_clean.shape[1]} columnas.")
+
+    # --------------------------------------------------------
+    # 3. VALIDATE
+    # --------------------------------------------------------
+    print("\n[3/5] VALIDACIÓN DE CALIDAD DE DATOS")
+    validation(df_clean)
+
+    # --------------------------------------------------------
+    # 4. MODELO DIMENSIONAL
+    # --------------------------------------------------------
+    print("\n[4/5] CONSTRUCCIÓN DEL MODELO DIMENSIONAL")
+
+    dim_geography = build_dim_geography(df_clean)
+    dim_service_unit = build_dim_service_unit(df_clean)
+    dim_service = build_dim_service(df_clean)
+    dim_beneficiary_profile = build_dim_beneficiary_profile(df_clean)
+    dim_attention_status = build_dim_attention_status(df_clean)
+
+    fact_atencion = build_fact_atencion(
+        df_clean,
+        dim_geography,
+        dim_service_unit,
+        dim_service,
+        dim_beneficiary_profile,
+        dim_attention_status,
+    )
+
+    print(f"dim_geography:            {len(dim_geography):,} filas")
+    print(f"dim_service_unit:         {len(dim_service_unit):,} filas")
+    print(f"dim_service:              {len(dim_service):,} filas")
+    print(f"dim_beneficiary_profile:  {len(dim_beneficiary_profile):,} filas")
+    print(f"dim_attention_status:     {len(dim_attention_status):,} filas")
+    print(f"fact_atencion:            {len(fact_atencion):,} filas")
+
+    # Respaldo local en CSV (opcional, útil para trazabilidad/depuración)
+    save_to_csv(dim_geography, RUTA_PROCESSED / "dim_geography.csv")
+    save_to_csv(dim_service_unit, RUTA_PROCESSED / "dim_service_unit.csv")
+    save_to_csv(dim_service, RUTA_PROCESSED / "dim_service.csv")
+    save_to_csv(dim_beneficiary_profile, RUTA_PROCESSED / "dim_beneficiary_profile.csv")
+    save_to_csv(dim_attention_status, RUTA_PROCESSED / "dim_attention_status.csv")
+    save_to_csv(fact_atencion, RUTA_PROCESSED / "fact_atencion.csv")
+
+    # --------------------------------------------------------
+    # 5. LOAD (MySQL)
+    # --------------------------------------------------------
+    print("\n[5/5] CARGA EN MYSQL")
+
+    # 5.1 Crear la base de datos y las tablas si no existen
+    crear_esquema()
+
+    # 5.2 Vaciar las tablas para permitir re-ejecuciones del ETL
+    #     sin duplicar datos ni romper las llaves foráneas.
+    reset_schema()
+
+    # 5.3 Cargar dimensiones primero (por las llaves foráneas del hecho)
+    save_to_mysql(
+        preparar_para_mysql(dim_geography, RENOMBRE_DIM_GEOGRAPHY),
+        "dim_geography",
+    )
+    save_to_mysql(
+        preparar_para_mysql(dim_service_unit, RENOMBRE_DIM_SERVICE_UNIT),
+        "dim_service_unit",
+    )
+    save_to_mysql(
+        preparar_para_mysql(dim_service, RENOMBRE_DIM_SERVICE),
+        "dim_service",
+    )
+    save_to_mysql(
+        preparar_para_mysql(dim_beneficiary_profile, RENOMBRE_DIM_BENEFICIARY_PROFILE),
+        "dim_beneficiary_profile",
+    )
+    save_to_mysql(
+        preparar_para_mysql(dim_attention_status, RENOMBRE_DIM_ATTENTION_STATUS),
+        "dim_attention_status",
+    )
+
+    # 5.4 Cargar la tabla de hechos (ya usa los mismos nombres del SQL)
+    save_to_mysql(fact_atencion, "fact_atencion")
+
+    print("\n" + "=" * 60)
+    print("PROCESO ETL FINALIZADO CORRECTAMENTE")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    ejecutar_etl()
